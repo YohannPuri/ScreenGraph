@@ -49,15 +49,29 @@ Each boundary is a trait, so new sources (Windows folders), groupers, inference 
 
 ### 3.1 photos-bridge
 
-A command-line helper bundled inside the app. The app's `Info.plist` carries `NSPhotoLibraryUsageDescription`, so macOS shows the standard permission prompt. Output is JSON lines on stdout; errors are JSON lines on stderr.
+A command-line helper bundled inside the app. The app's `Info.plist` carries `NSPhotoLibraryUsageDescription`, so macOS shows the standard permission prompt. Every output line is a JSON object with a `type` field; failures print one `error` line on stderr with a documented exit code (see `photos-bridge/README.md`).
 
 | Command | Output |
 |---|---|
 | `auth` | Requests access if needed, prints the authorization status |
 | `status` | Prints the authorization status without prompting |
-| `list --since <iso8601>` | One line per screenshot: `{id, createdAt, width, height, isFavorite}` |
+| `list [--since <iso8601>]` | One `screenshot` line per screenshot, then `end` with the count. `--since` is a filter, not a sync cursor |
 | `export <id> --to <path> [--max-dim N]` | Writes the image, downloading from iCloud if needed |
-| `watch` | Long-running; prints added, changed and removed screenshot IDs |
+| `sync` | Long-running; see below |
+
+`sync` owns one PhotoKit fetch result and change observer for its lifetime, which avoids a gap between a listing and a separately started watcher:
+
+```
+{"type":"snapshot_start","session":"s42"}
+{"type":"screenshot","id":"A",...}
+{"type":"snapshot_end","session":"s42","count":2}
+{"type":"added","id":"C"}
+{"type":"changed","id":"A"}
+{"type":"removed","id":"B"}
+{"type":"reconcile_required"}
+```
+
+Changes observed during the snapshot are buffered and emitted after `snapshot_end`. When PhotoKit can't describe a change incrementally, the bridge emits `reconcile_required` instead.
 
 The Rust core runs the helper through Tauri's sidecar support and parses each line as a typed event.
 
@@ -73,8 +87,9 @@ The Rust core runs the helper through Tauri's sidecar support and parses each li
 | Table | Purpose |
 |---|---|
 | `sources` | id, kind (`photos` / `folder`), config JSON (path, screenshots-only filter, excluded albums), enabled |
-| `assets` | A unique screenshot: sha256, phash, width, height, captured_at, thumbnail_path |
-| `asset_locations` | asset_id, source_id, locator (Photos ID or file path), first_seen, missing |
+| `assets` | A unique screenshot (by sha256): phash, width, height, captured_at, thumbnail_path |
+| `asset_locations` | asset_id, source_id, locator (Photos ID or file path), fingerprint, discovered_at, last_seen_scan_id, missing; unique on (source_id, locator) |
+| `source_scans` | id, source_id, started_at, completed_at, status (`running` / `complete` / `failed`) |
 | `asset_embeddings` | sqlite-vec: an image embedding per asset |
 | `items` | What the library shows: intent, title, fields JSON, confidence, status (`pending_review` / `accepted` / `discarded`), intent_def_version |
 | `item_assets` | item_id, asset_id, ordinal (an item can span several screenshots) |
@@ -88,8 +103,8 @@ The Rust core runs the helper through Tauri's sidecar support and parses each li
 ## 5. Pipeline
 
 ```
-source scan / watch
-  → upsert asset + location            (sha256 exact dedupe; phash near-duplicate → same asset)
+source sync (see 5.1)
+  → upsert asset + location            (sha256 exact dedupe; phash near-duplicates linked as candidates)
   → [job] embed image                  (EmbeddingGemma 2)
   → sequence grouping                  (captured within a time window AND cosine ≥ threshold → same item)
   → [job] stage 1: understand          (vision model reads all of the item's images, in order)
@@ -106,7 +121,46 @@ background: [job] clustering over embeddings → discovery suggestions
 - Editing an intent definition re-queues stage 2 only for items classified with an older `intent_def_version`.
 - Changing the vision model re-runs stage 1 only when the user requests it.
 - When an item's grouping changes, its stage 1 and stage 2 results are invalidated.
+- Perceptual-hash matches are not merged automatically, since near-identical screenshots (such as a conversation with one new message) can differ in meaning. They are linked as duplicate candidates for grouping and review.
 - An asset missing from every source is marked `missing`, not deleted. Accepted items are kept.
+
+### 5.1 Source sync
+
+Every source implements the same contract, so sync logic doesn't depend on the source type:
+
+```rust
+trait Source {
+    async fn scan(&self) -> Result<SourceSnapshot>;      // full inventory
+    async fn watch(&self) -> Result<SourceEventStream>;  // live changes
+    async fn read(&self, locator: &str) -> Result<AssetData>;
+}
+
+enum SourceEvent {
+    Upsert { locator: String, fingerprint: Option<String> },
+    Remove { locator: String },
+    ReconcileRequired,
+}
+```
+
+| | Apple Photos | Folder |
+|---|---|---|
+| Identity | PhotoKit `localIdentifier` | Path |
+| Live changes | `PHPhotoLibraryChangeObserver`, via `photos-bridge sync` | `notify` (FSEvents) |
+| Catch-up | Full metadata inventory | Recursive directory scan |
+
+Watching gives low-latency updates while the app runs. Reconciliation is a full inventory comparison that repairs anything missed while the app was closed or a watcher failed. `captured_at` (when the screenshot was taken) and `discovered_at` (when ScreenGraph first saw it) are independent, and neither is used as a sync cursor.
+
+**Reconciliation with scan generations:**
+1. Start the watcher and buffer its events, then create a `source_scans` row.
+2. Upsert every `(source_id, locator)` in the inventory and set `last_seen_scan_id`. Unchanged entries need no further processing.
+3. Only if the scan completes successfully with access intact, mark locations not seen in this scan as `missing`. A failed or interrupted scan changes nothing.
+4. Apply the buffered watcher events, then continue live.
+
+**Invariant:** a location is marked missing only after a complete, successful, authorized scan of its source, or a removal event for that location. Folder watcher events are treated as a reason to recheck a path, not as proof of a write or deletion.
+
+**Multiple sources:** missing state belongs to a location, not an asset. Deleting a screenshot from one folder leaves the asset present while any other source still has it.
+
+**When reconciliation runs:** when a source is added, at app launch, when a watcher fails or emits `ReconcileRequired`, when permissions or source settings change, and every 24 hours. The newest screenshots are processed first so the library fills quickly while the full scan continues in the background.
 
 ## 6. Intents
 
@@ -167,6 +221,7 @@ Each intent is a YAML file in `intents/` with a name, description, JSON schema o
 - **Snapshot tests** (`insta`) for Markdown export.
 - **Fake `ModelClient`** so pipeline tests and CI run without a model.
 - **Bridge contract tests:** Rust parses recorded `photos-bridge` output. Photos access itself is covered by a manual checklist.
+- **Sync tests:** an old screenshot arriving after newer ones, deletion from one of two sources, a watcher interruption during a scan, and access revoked during reconciliation.
 - **Evals:** `screengraph eval` reports intent and field accuracy per model and prompt version, against a public sample set in the repo and optional private labeled sets kept outside it.
 - **CI** (GitHub Actions, macOS): `cargo test`, `cargo clippy`, `cargo fmt --check`, `tsc`, UI tests.
 
