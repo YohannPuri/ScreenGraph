@@ -16,17 +16,21 @@ public enum PhotoLibrary {
         AuthStatus(await PHPhotoLibrary.requestAuthorization(for: accessLevel))
     }
 
-    /// Calls `body` for each screenshot in the Screenshots smart album, newest first.
+    /// Calls `body` for each screenshot in the Screenshots smart album, newest
+    /// first, and returns how many there were.
+    @discardableResult
     public static func forEachScreenshot(
         since: Date?,
         _ body: (ScreenshotRecord) throws -> Void
-    ) rethrows {
+    ) throws -> Int {
         let albums = PHAssetCollection.fetchAssetCollections(
             with: .smartAlbum,
             subtype: .smartAlbumScreenshots,
             options: nil
         )
-        guard let screenshots = albums.firstObject else { return }
+        guard let screenshots = albums.firstObject else {
+            throw BridgeError.screenshotsAlbumUnavailable
+        }
 
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
@@ -38,6 +42,7 @@ public enum PhotoLibrary {
         for index in 0..<assets.count {
             try body(ScreenshotRecord(assets.object(at: index)))
         }
+        return assets.count
     }
 }
 

@@ -21,7 +21,8 @@ let package = Package(
         ),
         .testTarget(
             name: "PhotosBridgeCoreTests",
-            dependencies: ["PhotosBridgeCore"]
+            // The executable is a dependency so CLITests can run the built binary.
+            dependencies: ["PhotosBridgeCore", "photos-bridge"]
         ),
     ]
 )

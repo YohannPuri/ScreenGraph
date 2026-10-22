@@ -51,6 +51,18 @@ public struct ScreenshotRecord: Codable, Equatable, Sendable {
     }
 }
 
+/// Printed by `list` after the last screenshot. Its absence means the listing
+/// was cut short and must not be treated as the complete library.
+public struct EndEvent: Codable, Equatable, Sendable {
+    public let type: String
+    public let count: Int
+
+    public init(count: Int) {
+        self.type = "end"
+        self.count = count
+    }
+}
+
 /// Printed to stderr when a command can't do its job.
 public struct ErrorEvent: Codable, Equatable, Sendable {
     public let type: String
@@ -62,4 +74,33 @@ public struct ErrorEvent: Codable, Equatable, Sendable {
         self.code = code
         self.message = message
     }
+}
+
+/// A failure the bridge reports as an `ErrorEvent` with a specific exit code.
+public struct BridgeError: Error, Equatable, Sendable {
+    public let code: String
+    public let message: String
+    public let exitCode: Int32
+
+    public init(code: String, message: String, exitCode: Int32) {
+        self.code = code
+        self.message = message
+        self.exitCode = exitCode
+    }
+
+    public static func notAuthorized(_ status: AuthStatus) -> BridgeError {
+        BridgeError(
+            code: "not_authorized",
+            message: "Photos access is '\(status.rawValue)'. Run 'photos-bridge auth' first.",
+            exitCode: 3
+        )
+    }
+
+    public static let screenshotsAlbumUnavailable = BridgeError(
+        code: "screenshots_album_unavailable",
+        message: "The Photos Screenshots album could not be fetched.",
+        exitCode: 4
+    )
+
+    public var event: ErrorEvent { ErrorEvent(code: code, message: message) }
 }

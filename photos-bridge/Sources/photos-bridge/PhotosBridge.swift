@@ -9,6 +9,32 @@ struct PhotosBridge: AsyncParsableCommand {
         abstract: "Reads screenshots from the Apple Photos library and prints JSON lines.",
         subcommands: [Auth.self, Status.self, List.self]
     )
+
+    /// Runs the command and reports every failure, including usage errors,
+    /// as a single JSON error line on stderr.
+    static func main() async {
+        do {
+            var command = try parseAsRoot()
+            if var asyncCommand = command as? AsyncParsableCommand {
+                try await asyncCommand.run()
+            } else {
+                try command.run()
+            }
+        } catch let error as BridgeError {
+            printError(error.event)
+            Foundation.exit(error.exitCode)
+        } catch {
+            let status = exitCode(for: error)
+            if status == .success {
+                // --help is reported through an error but isn't one.
+                print(fullMessage(for: error))
+                Foundation.exit(0)
+            }
+            let code = status == .validationFailure ? "usage" : "internal"
+            printError(ErrorEvent(code: code, message: message(for: error)))
+            Foundation.exit(status.rawValue)
+        }
+    }
 }
 
 struct Auth: AsyncParsableCommand {
@@ -34,7 +60,7 @@ struct Status: ParsableCommand {
 
 struct List: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Print one JSON line per screenshot, newest first."
+        abstract: "Print one JSON line per screenshot, newest first, then an end line."
     )
 
     @Option(help: "Only screenshots created after this ISO 8601 date (2026-10-01) or date-time.")
@@ -49,20 +75,17 @@ struct List: ParsableCommand {
     func run() throws {
         let status = PhotoLibrary.currentStatus()
         guard status.canRead else {
-            try printError(
-                code: "not_authorized",
-                message: "Photos access is '\(status.rawValue)'. Run 'photos-bridge auth' first."
-            )
-            throw ExitCode(3)
+            throw BridgeError.notAuthorized(status)
         }
 
-        try PhotoLibrary.forEachScreenshot(since: since.flatMap(SinceDate.parse)) { record in
+        let count = try PhotoLibrary.forEachScreenshot(since: since.flatMap(SinceDate.parse)) { record in
             print(try JSONLines.encode(record))
         }
+        print(try JSONLines.encode(EndEvent(count: count)))
     }
 }
 
-private func printError(code: String, message: String) throws {
-    let line = try JSONLines.encode(ErrorEvent(code: code, message: message)) + "\n"
+private func printError(_ event: ErrorEvent) {
+    let line = ((try? JSONLines.encode(event)) ?? #"{"type":"error","code":"internal","message":"unencodable error"}"#) + "\n"
     FileHandle.standardError.write(Data(line.utf8))
 }

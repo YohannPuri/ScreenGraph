@@ -37,6 +37,10 @@ struct JSONLinesTests {
         #expect(!line.contains("\n"))
     }
 
+    @Test func endEventCarriesCount() throws {
+        #expect(try JSONLines.encode(EndEvent(count: 3)) == #"{"count":3,"type":"end"}"#)
+    }
+
     @Test func eventsRoundTrip() throws {
         let event = AuthEvent(status: .limited)
         let data = Data(try JSONLines.encode(event).utf8)
@@ -51,11 +55,19 @@ struct SinceDateTests {
         #expect(SinceDate.parse("2026-10-01T12:30:00Z") == Date(timeIntervalSince1970: 1_790_857_800))
     }
 
+    @Test func parsesFractionalSeconds() {
+        #expect(SinceDate.parse("2026-10-01T12:30:00.123Z") == Date(timeIntervalSince1970: 1_790_857_800.123))
+    }
+
+    @Test func parsesTimezoneOffsets() {
+        #expect(SinceDate.parse("2026-10-01T14:30:00+02:00") == Date(timeIntervalSince1970: 1_790_857_800))
+    }
+
     @Test func parsesDateOnlyAsMidnightUTC() {
         #expect(SinceDate.parse("2026-10-01") == Date(timeIntervalSince1970: 1_790_812_800))
     }
 
-    @Test(arguments: ["", "yesterday", "10/01/2026", "2026-13-01"])
+    @Test(arguments: ["", "yesterday", "10/01/2026", "2026-13-01", "2026-10-01garbage", "2026-10-01T12:30"])
     func rejectsInvalid(_ text: String) {
         #expect(SinceDate.parse(text) == nil)
     }

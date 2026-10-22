@@ -11,15 +11,20 @@ public enum JSONLines {
     }
 }
 
-/// Parses `--since` values: a full ISO 8601 date-time, or a date (midnight UTC).
+/// Parses `--since` values: an ISO 8601 date-time (with or without fractional
+/// seconds), or a bare date, which means midnight UTC.
 public enum SinceDate {
     public static func parse(_ text: String) -> Date? {
-        let dateTime = ISO8601DateFormatter()
-        if let date = dateTime.date(from: text) {
-            return date
+        if text.wholeMatch(of: /\d{4}-\d{2}-\d{2}/) != nil {
+            return formatter([.withFullDate]).date(from: text)
         }
-        let dateOnly = ISO8601DateFormatter()
-        dateOnly.formatOptions = [.withFullDate]
-        return dateOnly.date(from: text)
+        return formatter([.withInternetDateTime, .withFractionalSeconds]).date(from: text)
+            ?? formatter([.withInternetDateTime]).date(from: text)
+    }
+
+    private static func formatter(_ options: ISO8601DateFormatter.Options) -> ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = options
+        return formatter
     }
 }
