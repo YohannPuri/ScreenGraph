@@ -61,14 +61,11 @@ extension AuthStatus {
 
 extension ScreenshotRecord {
     init(_ asset: PHAsset) {
-        let coordinate = asset.location?.coordinate
         self.init(
             id: asset.localIdentifier,
             createdAt: asset.creationDate,
             width: asset.pixelWidth,
             height: asset.pixelHeight,
-            latitude: coordinate?.latitude,
-            longitude: coordinate?.longitude,
             isFavorite: asset.isFavorite
         )
     }

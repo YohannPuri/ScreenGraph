@@ -27,8 +27,6 @@ public struct ScreenshotRecord: Codable, Equatable, Sendable {
     public let createdAt: Date?
     public let width: Int
     public let height: Int
-    public let latitude: Double?
-    public let longitude: Double?
     public let isFavorite: Bool
 
     public init(
@@ -36,8 +34,6 @@ public struct ScreenshotRecord: Codable, Equatable, Sendable {
         createdAt: Date?,
         width: Int,
         height: Int,
-        latitude: Double? = nil,
-        longitude: Double? = nil,
         isFavorite: Bool = false
     ) {
         self.type = "screenshot"
@@ -45,8 +41,6 @@ public struct ScreenshotRecord: Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.width = width
         self.height = height
-        self.latitude = latitude
-        self.longitude = longitude
         self.isFavorite = isFavorite
     }
 }

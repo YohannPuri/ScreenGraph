@@ -12,22 +12,19 @@ struct JSONLinesTests {
             createdAt: Date(timeIntervalSince1970: 1_760_000_000),
             width: 1179,
             height: 2556,
-            latitude: 37.77,
-            longitude: -122.42,
             isFavorite: true
         )
 
         let line = try JSONLines.encode(record)
 
-        #expect(line == #"{"createdAt":"2025-10-09T08:53:20Z","height":2556,"id":"ABC/L0/001","isFavorite":true,"latitude":37.77,"longitude":-122.42,"type":"screenshot","width":1179}"#)
+        #expect(line == #"{"createdAt":"2025-10-09T08:53:20Z","height":2556,"id":"ABC/L0/001","isFavorite":true,"type":"screenshot","width":1179}"#)
     }
 
-    @Test func missingLocationIsOmitted() throws {
+    @Test func missingCreationDateIsOmitted() throws {
         let record = ScreenshotRecord(id: "X", createdAt: nil, width: 10, height: 20)
 
         let line = try JSONLines.encode(record)
 
-        #expect(!line.contains("latitude"))
         #expect(!line.contains("createdAt"))
     }
 
