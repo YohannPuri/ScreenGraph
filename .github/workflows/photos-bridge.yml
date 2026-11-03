@@ -1,0 +1,19 @@
+name: photos-bridge
+
+on:
+  push:
+    branches: [main]
+    paths: ["photos-bridge/**", ".github/workflows/photos-bridge.yml"]
+  pull_request:
+    paths: ["photos-bridge/**", ".github/workflows/photos-bridge.yml"]
+
+jobs:
+  test:
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: photos-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: scripts/test.sh
